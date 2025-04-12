@@ -219,19 +219,20 @@ function generateJsonData($liveEvents, $upcomingEvents) {
 }
 
 function generateM3uPlaylist($liveEvents) {
+    define('PROXY_API', 'https://willow-tv-darshaniptv.vercel.app/api/');
     $lines = ["#EXTM3U"];
     foreach ($liveEvents as $event) {
         $eventName = $event["name"] ?? "Unknown Event";
         if (isset($event["m3u8_eng_url"])) {
             $lines[] = '#EXTINF:-1 tvg-logo="https://img.willow.tv/apps/wtv_logo_new_200_200.jpg" group-title="WILLOW LIVE EVENTS @DARSHANIPTV",' . $eventName . ' (ENGLISH)';
             $lines[] = '#EXTVLCOPT:http-user-agent=' . USER_AGENT;
-            $lines[] = $event["m3u8_eng_url"];
+            $lines[] = PROXY_API . $event["m3u8_eng_url"];
             $lines[] = "";
         }
         if (isset($event["m3u8_hin_url"])) {
             $lines[] = '#EXTINF:-1 tvg-logo="https://img.willow.tv/apps/wtv_logo_new_200_200.jpg" group-title="WILLOW LIVE EVENTS @DARSHANIPTV",' . $eventName . ' (HINDI)';
             $lines[] = '#EXTVLCOPT:http-user-agent=' . USER_AGENT;
-            $lines[] = $event["m3u8_hin_url"];
+            $lines[] = PROXY_API . $event["m3u8_hin_url"];
             $lines[] = "";
         }
     }
