@@ -1,21 +1,27 @@
 {
     "version": 2,
-    "builds": [{
-      "src": "api/index.php",
-      "use": "vercel-php"
-    }],
+    "builds": [
+        {
+            "src": "api/index.php",
+            "use": "vercel-php",
+            "config": {
+                "composerInstall": true,
+                "phpVersion": "8.0"
+            }
+        }
+    ],
     "routes": [
-      {
-        "src": "/api/willow-tv",
-        "dest": "/api/index.php"
-      },
-      {
-        "src": "/api/willow-tv-fixtures.json",
-        "dest": "/api/index.php"
-      },
-      {
-        "src": "/api/willow-tv.m3u",
-        "dest": "/api/index.php"
-      }
+        {
+            "src": "/api/willow-tv",
+            "dest": "/api/index.php"
+        },
+        {
+            "src": "/api/willow-tv-fixtures.json",
+            "dest": "/api/index.php"
+        },
+        {
+            "src": "/api/willow-tv.m3u",
+            "dest": "/api/index.php"
+        }
     ]
-  }
+}
