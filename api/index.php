@@ -20,7 +20,7 @@ function fetchData() {
                 'connect_timeout' => 5
             ]);
             $body = $response->getBody()->getContents();
-            // Extract JSON from response (mimicking Python's extract_json)
+            // Extract JSON from response
             $start = strpos($body, '{');
             $end = strrpos($body, '}') + 1;
             if ($start === false || $end === false) {
@@ -39,6 +39,7 @@ function fetchData() {
             }
         }
     }
+    error_log("Failed to fetch data after max retries");
     return null;
 }
 
@@ -59,6 +60,7 @@ function getFinalM3u8Url($initialUrl) {
                         $path = trim($lines[$i + 1]);
                         $resolutions[] = ['resolution' => $resolution, 'path' => $path];
                     } catch (Exception $e) {
+                        error_log("Error parsing resolution line: " . $e->getMessage());
                         continue;
                     }
                 }
@@ -85,7 +87,9 @@ function getFinalM3u8Url($initialUrl) {
             }
             $manifestPath = str_replace('../../../', '', $relPath);
             $finalPath = "/v1/$manifestPath";
-            return $parsed['scheme'] . '://' . $parsed['host'] . $finalPath;
+            $finalUrl = $parsed['scheme'] . '://' . $parsed['host'] . $finalPath;
+            error_log("Generated final URL: $finalUrl");
+            return $finalUrl;
         } catch (Exception $e) {
             error_log("M3u8 URL processing attempt $attempt failed: " . $e->getMessage());
             if ($attempt < MAX_RETRIES - 1) {
@@ -93,6 +97,7 @@ function getFinalM3u8Url($initialUrl) {
             }
         }
     }
+    error_log("Failed to generate final m3u8 URL for $initialUrl after max retries");
     return null;
 }
 
@@ -133,14 +138,29 @@ function getM3u8Urls($eventId) {
             }
             $englishUrl = null;
             $hindiUrl = null;
+            $source1Url = null;
+            $source2Url = null;
             foreach ($data['result'] ?? [] as $stream) {
-                if ($stream['title'] === 'LIVE SOURCE ENGLISH') {
+                $title = $stream['title'] ?? '';
+                error_log("Processing stream for event $eventId: $title");
+                if ($title === 'LIVE SOURCE ENGLISH') {
+                    error_log("Fetching English URL for event $eventId: " . $stream['secureurl']);
                     $englishUrl = getFinalM3u8Url($stream['secureurl']);
-                } elseif ($stream['title'] === 'LIVE SOURCE HINDI') {
+                } elseif ($title === 'LIVE SOURCE HINDI') {
+                    error_log("Fetching Hindi URL for event $eventId: " . $stream['secureurl']);
                     $hindiUrl = getFinalM3u8Url($stream['secureurl']);
+                } elseif ($title === 'LIVE VIDEO SOURCE 1') {
+                    error_log("Fetching Source 1 URL for event $eventId: " . $stream['secureurl']);
+                    $source1Url = getFinalM3u8Url($stream['secureurl']);
+                } elseif ($title === 'LIVE VIDEO SOURCE 2') {
+                    error_log("Fetching Source 2 URL for event $eventId: " . $stream['secureurl']);
+                    $source2Url = getFinalM3u8Url($stream['secureurl']);
                 }
             }
-            return [$englishUrl, $hindiUrl];
+            if (!$englishUrl && !$hindiUrl && !$source1Url && !$source2Url) {
+                error_log("No valid streams found for event $eventId");
+            }
+            return [$englishUrl, $hindiUrl, $source1Url, $source2Url];
         } catch (Exception $e) {
             error_log("M3u8 URLs attempt $attempt for event $eventId failed: " . $e->getMessage());
             if ($attempt < MAX_RETRIES - 1) {
@@ -148,7 +168,8 @@ function getM3u8Urls($eventId) {
             }
         }
     }
-    return [null, null];
+    error_log("Failed to get m3u8 URLs for event $eventId after max retries");
+    return [null, null, null, null];
 }
 
 function processEvent($event) {
@@ -177,19 +198,27 @@ function processEvent($event) {
         ];
         if ($status === "LIVE") {
             error_log("Processing live event ID: " . $event['Id']);
-            list($englishUrl, $hindiUrl) = getM3u8Urls($event["Id"]);
+            list($englishUrl, $hindiUrl, $source1Url, $source2Url) = getM3u8Urls($event["Id"]);
             if ($englishUrl) {
                 $result["m3u8_eng_url"] = $englishUrl;
-                error_log("Added English URL for event " . $event['Id']);
+                error_log("Added English URL for event " . $event['Id'] . ": $englishUrl");
             }
             if ($hindiUrl) {
                 $result["m3u8_hin_url"] = $hindiUrl;
-                error_log("Added Hindi URL for event " . $event['Id']);
+                error_log("Added Hindi URL for event " . $event['Id'] . ": $hindiUrl");
+            }
+            if ($source1Url) {
+                $result["m3u8_source1_url"] = $source1Url;
+                error_log("Added Source 1 URL for event " . $event['Id'] . ": $source1Url");
+            }
+            if ($source2Url) {
+                $result["m3u8_source2_url"] = $source2Url;
+                error_log("Added Source 2 URL for event " . $event['Id'] . ": $source2Url");
             }
         }
         return $result;
     } catch (Exception $e) {
-        error_log("Error processing event: " . $e->getMessage());
+        error_log("Error processing event ID " . ($event['Id'] ?? 'unknown') . ": " . $e->getMessage());
         return null;
     }
 }
@@ -223,17 +252,34 @@ function generateM3uPlaylist($liveEvents) {
     $lines = ["#EXTM3U"];
     foreach ($liveEvents as $event) {
         $eventName = $event["name"] ?? "Unknown Event";
+        error_log("Generating M3U entry for event: $eventName");
         if (isset($event["m3u8_eng_url"])) {
             $lines[] = '#EXTINF:-1 tvg-logo="https://img.willow.tv/apps/wtv_logo_new_200_200.jpg" group-title="WILLOW LIVE EVENTS @DARSHANIPTV",' . $eventName . ' (ENGLISH)';
             $lines[] = '#EXTVLCOPT:http-user-agent=' . USER_AGENT;
             $lines[] = PROXY_API . $event["m3u8_eng_url"];
             $lines[] = "";
+            error_log("Added English stream to M3U for $eventName");
         }
         if (isset($event["m3u8_hin_url"])) {
             $lines[] = '#EXTINF:-1 tvg-logo="https://img.willow.tv/apps/wtv_logo_new_200_200.jpg" group-title="WILLOW LIVE EVENTS @DARSHANIPTV",' . $eventName . ' (HINDI)';
             $lines[] = '#EXTVLCOPT:http-user-agent=' . USER_AGENT;
             $lines[] = PROXY_API . $event["m3u8_hin_url"];
             $lines[] = "";
+            error_log("Added Hindi stream to M3U for $eventName");
+        }
+        if (isset($event["m3u8_source1_url"])) {
+            $lines[] = '#EXTINF:-1 tvg-logo="https://img.willow.tv/apps/wtv_logo_new_200_200.jpg" group-title="WILLOW LIVE EVENTS @DARSHANIPTV",' . $eventName . ' (SOURCE 1)';
+            $lines[] = '#EXTVLCOPT:http-user-agent=' . USER_AGENT;
+            $lines[] = PROXY_API . $event["m3u8_source1_url"];
+            $lines[] = "";
+            error_log("Added Source 1 stream to M3U for $eventName");
+        }
+        if (isset($event["m3u8_source2_url"])) {
+            $lines[] = '#EXTINF:-1 tvg-logo="https://img.willow.tv/apps/wtv_logo_new_200_200.jpg" group-title="WILLOW LIVE EVENTS @DARSHANIPTV",' . $eventName . ' (SOURCE 2)';
+            $lines[] = '#EXTVLCOPT:http-user-agent=' . USER_AGENT;
+            $lines[] = PROXY_API . $event["m3u8_source2_url"];
+            $lines[] = "";
+            error_log("Added Source 2 stream to M3U for $eventName");
         }
     }
     return implode("\n", $lines);
@@ -251,15 +297,21 @@ if (!$data) {
 
 $liveEvents = [];
 foreach ($data['live'] ?? [] as $event) {
+    error_log("Found live event: " . ($event['Name'] ?? 'Unknown') . " (ID: " . ($event['Id'] ?? 'unknown') . ")");
     if ($processed = processEvent($event)) {
         $liveEvents[] = $processed;
+    } else {
+        error_log("Failed to process live event ID: " . ($event['Id'] ?? 'unknown'));
     }
 }
 
 $upcomingEvents = [];
 foreach ($data['upcoming'] ?? [] as $event) {
+    error_log("Found upcoming event: " . ($event['Name'] ?? 'Unknown') . " (ID: " . ($event['Id'] ?? 'unknown') . ")");
     if ($processed = processEvent($event)) {
         $upcomingEvents[] = $processed;
+    } else {
+        error_log("Failed to process upcoming event ID: " . ($event['Id'] ?? 'unknown'));
     }
 }
 
